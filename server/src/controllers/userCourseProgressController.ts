@@ -1,0 +1,240 @@
+import { Request, Response } from "express";
+import { getAuth } from "@clerk/express";
+import UserCourseProgress from "../models/userCourseProgressModel.js";
+import Course from "../models/courseModel.js";
+import { calculateOverallProgress } from "../utils/utils.js";
+import { mergeSections } from "../utils/utils.js";
+
+// export const getUserEnrolledCourses = async (
+//   req: Request,
+//   res: Response
+// ): Promise<void> => {
+//   const { userId } = req.params;
+//   const auth = getAuth(req);
+
+//   if (!auth || auth.userId !== userId) {
+//     res.status(403).json({ message: "Access denied" });
+//     return;
+//   }
+
+//   try {
+//     const enrolledCourses = await UserCourseProgress.query("userId")
+//       .eq(userId)
+//       .exec();
+//     const courseIds = enrolledCourses.map((item: any) => item.courseId);
+//     const courses = await Course.batchGet(courseIds);
+//     res.json({
+//       message: "Enrolled courses retrieved successfully",
+//       data: courses,
+//     });
+//   } catch (error) {
+//     res
+//       .status(500)
+//       .json({ message: "Error retrieving enrolled courses", error });
+//   }
+// };
+
+
+export const getUserEnrolledCourses = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  const { userId } = req.params;
+
+  if (typeof userId !== "string") {
+    res.status(400).json({
+      message: "Invalid userId",
+    });
+    return;
+  }
+
+  const auth = getAuth(req);
+
+  if (!auth || auth.userId !== userId) {
+    res.status(403).json({ message: "Access denied" });
+    return;
+  }
+
+  try {
+    const enrolledCourses = await UserCourseProgress.query("userId")
+      .eq(userId)
+      .exec();
+
+    const courseIds = enrolledCourses.map((item: any) => item.courseId);
+
+    // Prevent DynamoDB BatchGetItem from receiving an empty list
+    if (courseIds.length === 0) {
+      res.json({
+        message: "No enrolled courses found",
+        data: [],
+      });
+      return;
+    }
+
+    const courses = await Course.batchGet(courseIds);
+
+    res.json({
+      message: "Enrolled courses retrieved successfully",
+      data: courses,
+    });
+  } catch (error) {
+    console.error("Error retrieving enrolled courses:", error);
+
+    res.status(500).json({
+      message: "Error retrieving enrolled courses",
+      error,
+    });
+  }
+};
+
+
+
+export const getUserCourseProgress = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  const { userId, courseId } = req.params;
+  if (typeof userId !== "string" || typeof courseId !== "string") {
+    res.status(400).json({
+      message: "Invalid userId or courseId",
+    });
+    return;
+  }
+
+  try {
+    const progress = await UserCourseProgress.get({ userId, courseId });
+    if (!progress) {
+      res
+        .status(404)
+        .json({ message: "Course progress not found for this user" });
+      return;
+    }
+    res.json({
+      message: "Course progress retrieved successfully",
+      data: progress,
+    });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Error retrieving user course progress", error });
+  }
+};
+
+// export const updateUserCourseProgress = async (
+//   req: Request,
+//   res: Response
+// ): Promise<void> => {
+//   const { userId, courseId } = req.params;
+//   const progressData = req.body;
+
+//   try {
+//     let progress = await UserCourseProgress.get({ userId, courseId });
+
+//     if (!progress) {
+//       // If no progress exists, create initial progress
+//       progress = new UserCourseProgress({
+//         userId,
+//         courseId,
+//         enrollmentDate: new Date().toISOString(),
+//         overallProgress: 0,
+//         sections: progressData.sections || [],
+//         lastAccessedTimestamp: new Date().toISOString(),
+//       });
+//     } else {
+//       // Merge existing progress with new progress data
+//       progress.sections = mergeSections(
+//         progress.sections,
+//         progressData.sections || []
+//       );
+//       progress.lastAccessedTimestamp = new Date().toISOString();
+//       progress.overallProgress = calculateOverallProgress(progress.sections);
+//     }
+
+//     await progress.save();
+
+//     res.json({
+//       message: "",
+//       data: progress,
+//     });
+//   } catch (error) {
+//     console.error("Error updating progress:", error);
+//     res.status(500).json({
+//       message: "Error updating user course progress",
+//       error,
+//     });
+//   }
+// };
+
+export const updateUserCourseProgress = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  const { userId, courseId } = req.params;
+  const progressData = req.body;
+
+  if (typeof userId !== "string" || typeof courseId !== "string") {
+    res.status(400).json({
+      message: "Invalid userId or courseId",
+    });
+    return;
+  }
+
+  try {
+    const existingProgress = await UserCourseProgress.get({
+      userId,
+      courseId,
+    });
+
+    if (!existingProgress) {
+      // Create initial progress
+      const progress = await UserCourseProgress.create({
+        userId,
+        courseId,
+        enrollmentDate: new Date().toISOString(),
+        overallProgress: 0,
+        sections: progressData.sections || [],
+        lastAccessedTimestamp: new Date().toISOString(),
+      });
+
+      res.json({
+        message: "User course progress created successfully",
+        data: progress,
+      });
+
+      return;
+    }
+
+    // Merge existing progress with new progress data
+    const sections = mergeSections(
+      existingProgress.sections,
+      progressData.sections || []
+    );
+
+    const overallProgress = calculateOverallProgress(sections);
+
+    // Update the existing DynamoDB item
+    const progress = await UserCourseProgress.update(
+      {
+        userId,
+        courseId,
+      },
+      {
+        sections,
+        lastAccessedTimestamp: new Date().toISOString(),
+        overallProgress,
+      }
+    );
+
+    res.json({
+      message: "User course progress updated successfully",
+      data: progress,
+    });
+  } catch (error) {
+    console.error("Error updating progress:", error);
+
+    res.status(500).json({
+      message: "Error updating user course progress",
+      error,
+    });
+  }
+};
