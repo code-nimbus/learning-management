@@ -4,7 +4,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "build": "rimraf dist && npx tsc",
+    "build": "rimraf dist && npx tsc && cpx \"src/seed/data/**/*\" dist/seed/data",
     "start": "npm run build && node dist/index.js",
     "dev": "concurrently \"npx tsc --watch\" \"npx nodemon dist/index.js\"",
     "seed": "npm run build && cp -R src/seed/data dist/seed/data && node dist/seed/seedDynamodb.js"
@@ -40,6 +40,7 @@
     "@types/node": "^26.4.1",
     "@types/uuid": "^10.0.0",
     "concurrently": "^9.2.4",
+    "cpx": "^1.5.0",
     "nodemon": "^3.1.14",
     "rimraf": "^5.0.10",
     "ts-node": "^10.9.2",
